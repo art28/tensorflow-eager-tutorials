@@ -23,7 +23,7 @@ GAMMA = 0.95  # discount rate
 
 
 class DQNAgent(tf.keras.Model):
-    def __init__(self, state_shape, action_dim, checkpoint_directory, batch_size=32, device_name='cpu:0'):
+    def __init__(self, state_shape, action_dim, checkpoint_directory, batch_size=BATCH_SIZE, device_name='cpu:0'):
         super(DQNAgent, self).__init__()
         # state's shape , in Atari we will use (-1, 105, 80, 1)
         self.state_shape = state_shape
@@ -137,7 +137,7 @@ class DQNAgent(tf.keras.Model):
         predictoins = self.predict(state_batch, training)
         # loss_value = tf.losses.mean_squared_error(labels=target, predictions=predictoins)
         loss_value = self.huber_loss(labels=target, predictions=predictoins)
-        return loss_value
+        return tf.reduce_sum(loss_value)
 
     def grad(self, state_batch, target, training):
         with tfe.GradientTape() as tape:
@@ -179,12 +179,8 @@ class DQNAgent(tf.keras.Model):
         state_batch, action_batch, reward_batch, next_state_batch, terminal_batch = self.replay_memory.get_batch(
             self.batch_size)
 
-        # method 1 : maintain direction for original q values
         current_q = self.predict(state_batch, training=False).numpy()
-        now_q = current_q.copy() * 0.75
-
-        # method 2 : use zero value actions other than selected action
-        # current_q = np.zeros((self.batch_size,self.action_size))
+        now_q = np.zeros((self.batch_size,self.action_dim))
 
         target_q_batch = self.predict_target(next_state_batch, training=False)
 
@@ -197,6 +193,11 @@ class DQNAgent(tf.keras.Model):
             for i in range(num_epochs):
                 grads = self.grad(state_batch, now_q, True)
                 self.optimizer.apply_gradients(zip(grads, self.variables))
+
+        if self.step_count % 1000 == 0 :
+            print("loss: %6f" % self.loss(state_batch, now_q, False).numpy())
+
+        return
 
     def save(self, global_step=0):
         tfe.Saver(self.variables).save(self.checkpoint_directory, global_step=global_step)

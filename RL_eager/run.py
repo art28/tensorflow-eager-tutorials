@@ -1,8 +1,6 @@
 from agent import DQNAgent
 from preprocess import preprocess
 
-
-
 import gym
 env = gym.make('Breakout-v0')
 agent = DQNAgent(state_shape=(-1, 105, 80, 1), action_dim=4,
