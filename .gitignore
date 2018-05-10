@@ -120,3 +120,4 @@ datasets/aclImdb/*
 
 
 models_checkpoints/*
+RL_eager/models_checkpoints/*
