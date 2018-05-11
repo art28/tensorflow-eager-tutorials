@@ -1,13 +1,8 @@
 import numpy as np
+import cv2
 
 
-def to_grayscale(img):
-    return np.mean(img, axis=2).astype(np.uint8)
-
-
-def downsample(img):
-    return img[::2, ::2]
-
-
-def preprocess(img):
-    return to_grayscale(downsample(img)).astype("float32")
+def preprocess(observation):
+    # RGB to Gray-Scale, to size 80*80
+    observation = cv2.cvtColor(cv2.resize(observation, (80, 80)), cv2.COLOR_BGR2GRAY)
+    return np.reshape(observation, (80, 80, 1))
