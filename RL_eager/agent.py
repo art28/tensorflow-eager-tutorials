@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import random
+from glob import glob
 
 import numpy as np
 
@@ -14,24 +15,37 @@ tfe.enable_eager_execution(device_policy=tfe.DEVICE_PLACEMENT_SILENT)
 
 # Hyper parameter
 INITIAL_EPSILON = 1.0  # initial exploration rate
-FINAL_EPSILON = 0.1  # final exploration rate
+FINAL_EPSILON = 0.05  # final exploration rate
 LEARNING_RATE = 0.001  # learning rate
 OBSERVATION_STEPS = 50000  # step for observing(not trainig)
 EXPLORATION_STEPS = 500000  # step for exploration(epsilon > FINAL_EPSILON)
 BATCH_SIZE = 32  # batch size
-GAMMA = 0.95  # discount rate
+GAMMA = 0.99  # discount rate
 
 
 class DQNAgent(tf.keras.Model):
-    def __init__(self, state_shape, action_dim, checkpoint_directory, batch_size=BATCH_SIZE, device_name='cpu:0'):
+    def __init__(self,
+                 state_shape,
+                 action_dim,
+                 checkpoint_directory,
+                 batch_size=BATCH_SIZE,
+                 initial_epsilon= INITIAL_EPSILON,
+                 final_epsilon=FINAL_EPSILON,
+                 exploration_steps=EXPLORATION_STEPS,
+                 observation_steps=OBSERVATION_STEPS,
+                 device_name='cpu:0'):
         super(DQNAgent, self).__init__()
         # state's shape , in Atari we will use (-1, 105, 80, 1)
         self.state_shape = state_shape
         # number of actions, in Atari 4
         self.action_dim = action_dim
-
         # saving checkpoint directory
         self.checkpoint_directory = checkpoint_directory
+
+        self.observation_steps=observation_steps
+        self.exploration_steps = exploration_steps
+        self.initial_epsilon=initial_epsilon
+        self.final_epsilon=final_epsilon
 
         # init q layers
         self.conv1 = tf.layers.Conv2D(32, 8, 8, padding='same', activation=tf.nn.relu)
@@ -46,6 +60,7 @@ class DQNAgent(tf.keras.Model):
 
         self.base_layers = [self.conv1, self.batch1, self.conv2, self.batch2, self.conv3, self.flatten, self.dense1,
                             self.dense2]
+
 
         # target q layers
         self.conv1_t = tf.layers.Conv2D(32, 8, 8, padding='same', activation=tf.nn.relu)
@@ -65,15 +80,16 @@ class DQNAgent(tf.keras.Model):
         self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
 
         # epsilon-greedy
-        self.epsilon = INITIAL_EPSILON
-        self.epsilon_step = (INITIAL_EPSILON - FINAL_EPSILON) / EXPLORATION_STEPS
+        self.epsilon = initial_epsilon
+        self.epsilon_step = (initial_epsilon - final_epsilon) / exploration_steps
 
         # replay_memory
-        self.replay_memory = ReplayMemory(1000000)
+        self.replay_memory = ReplayMemory(100000)
         self.batch_size = batch_size
 
         # for logging
         self.step_count = 0
+        self.sum_loss = 0;
 
         # device configuration
         self.device_name = device_name
@@ -137,7 +153,8 @@ class DQNAgent(tf.keras.Model):
         predictoins = self.predict(state_batch, training)
         # loss_value = tf.losses.mean_squared_error(labels=target, predictions=predictoins)
         loss_value = self.huber_loss(labels=target, predictions=predictoins)
-        return tf.reduce_sum(loss_value)
+        self.sum_loss += tf.reduce_sum(loss_value).numpy()
+        return loss_value
 
     def grad(self, state_batch, target, training):
         with tfe.GradientTape() as tape:
@@ -151,7 +168,7 @@ class DQNAgent(tf.keras.Model):
             else:
                 action = tf.argmax(self.predict(state, training=training), 1)
 
-            if self.epsilon > FINAL_EPSILON and self.step_count > OBSERVATION_STEPS:
+            if self.epsilon > self.final_epsilon and self.step_count > self.observation_steps:
                 self.epsilon -= self.epsilon_step
 
             return action
@@ -160,13 +177,14 @@ class DQNAgent(tf.keras.Model):
             return tf.argmax(self.predict(state, training=training), 1)
 
     def step(self, state, action, reward, next_state, terminal):
-        if self.step_count <= OBSERVATION_STEPS:
+        if self.step_count <= self.observation_steps:
             self.observe(state, action, reward, next_state, terminal)
         else:
             self.fit(state, action, reward, next_state, terminal)
 
         if self.step_count % 1000 == 0:
             print("STEP %s : EPSILON [%6f]...." % (self.step_count, self.epsilon))
+            print("=============================================")
         self.step_count += 1
 
     def observe(self, state, action, reward, next_state, terminal):
@@ -195,7 +213,11 @@ class DQNAgent(tf.keras.Model):
                 self.optimizer.apply_gradients(zip(grads, self.variables))
 
         if self.step_count % 1000 == 0 :
-            print("loss: %6f" % self.loss(state_batch, now_q, False).numpy())
+            print("loss: %6f" % (self.sum_loss/1000))
+            self.sum_loss = 0
+            print(current_q[0])
+            print(now_q[0])
+            print(self.predict(state_batch[0], training=False).numpy())
 
         return
 
@@ -204,7 +226,10 @@ class DQNAgent(tf.keras.Model):
 
     def load_last_checkpoint(self):
         # Run the model once to initialize variables
-        dummy_input = tf.constant(tf.zeros(self.state_shape))
+        initialshape = list(self.state_shape)
+        initialshape[0] = 1
+        initialshape = tuple(initialshape)
+        dummy_input = tf.constant(tf.zeros(initialshape))
         dummy_pred = self.predict(dummy_input, training=False)
         # Restore the variables of the model
         saver = tfe.Saver(self.variables)
