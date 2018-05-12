@@ -20,20 +20,21 @@ LEARNING_RATE = 0.001  # learning rate
 OBSERVATION_STEPS = 50000  # step for observing(not trainig)
 EXPLORATION_STEPS = 500000  # step for exploration(epsilon > FINAL_EPSILON)
 BATCH_SIZE = 32  # batch size
-GAMMA = 0.99  # discount rate
+GAMMA = 0.97  # discount rate
 
 
 class DQNAgent(tf.keras.Model):
     def __init__(self,
-                 state_shape,
-                 action_dim,
-                 checkpoint_directory,
+                 state_shape=(-1,80,80,1),
+                 action_dim=4,
+                 checkpoint_directory="models_checkpoints/rl/",
                  batch_size=BATCH_SIZE,
                  initial_epsilon= INITIAL_EPSILON,
                  final_epsilon=FINAL_EPSILON,
                  exploration_steps=EXPLORATION_STEPS,
                  observation_steps=OBSERVATION_STEPS,
                  device_name='cpu:0'):
+
         super(DQNAgent, self).__init__()
         # state's shape , in Atari we will use (-1, 105, 80, 1)
         self.state_shape = state_shape
@@ -60,7 +61,6 @@ class DQNAgent(tf.keras.Model):
 
         self.base_layers = [self.conv1, self.batch1, self.conv2, self.batch2, self.conv3, self.flatten, self.dense1,
                             self.dense2]
-
 
         # target q layers
         self.conv1_t = tf.layers.Conv2D(32, 8, 8, padding='same', activation=tf.nn.relu)
@@ -150,9 +150,9 @@ class DQNAgent(tf.keras.Model):
         return use_linear_term * linear_term + (1 - use_linear_term) * quadratic_term
 
     def loss(self, state_batch, target, training):
-        predictoins = self.predict(state_batch, training)
-        # loss_value = tf.losses.mean_squared_error(labels=target, predictions=predictoins)
-        loss_value = self.huber_loss(labels=target, predictions=predictoins)
+        predictions = self.predict(state_batch, training)
+        # loss_value = tf.losses.mean_squared_error(labels=target, predictions=predictions)
+        loss_value = self.huber_loss(labels=target, predictions=predictions)
         self.sum_loss += tf.reduce_sum(loss_value).numpy()
         return loss_value
 
@@ -215,8 +215,8 @@ class DQNAgent(tf.keras.Model):
         if self.step_count % 1000 == 0 :
             print("loss: %6f" % (self.sum_loss/1000))
             self.sum_loss = 0
-            print(current_q[0])
-            print(now_q[0])
+            # print(current_q[0])
+            # print(now_q[0])
             print(self.predict(state_batch[0], training=False).numpy())
 
         return
