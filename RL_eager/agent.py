@@ -15,24 +15,26 @@ tfe.enable_eager_execution(device_policy=tfe.DEVICE_PLACEMENT_SILENT)
 
 # Hyper parameter
 INITIAL_EPSILON = 1.0  # initial exploration rate
-FINAL_EPSILON = 0.05  # final exploration rate
+FINAL_EPSILON = 0.1  # final exploration rate
 LEARNING_RATE = 0.001  # learning rate
 OBSERVATION_STEPS = 50000  # step for observing(not trainig)
 EXPLORATION_STEPS = 500000  # step for exploration(epsilon > FINAL_EPSILON)
 BATCH_SIZE = 32  # batch size
 GAMMA = 0.97  # discount rate
+REWARD_WEIGHT = 12
 
 
 class DQNAgent(tf.keras.Model):
     def __init__(self,
-                 state_shape=(-1,80,80,1),
+                 state_shape=(-1, 80, 80, 1),
                  action_dim=4,
                  checkpoint_directory="models_checkpoints/rl/",
                  batch_size=BATCH_SIZE,
-                 initial_epsilon= INITIAL_EPSILON,
+                 initial_epsilon=INITIAL_EPSILON,
                  final_epsilon=FINAL_EPSILON,
                  exploration_steps=EXPLORATION_STEPS,
                  observation_steps=OBSERVATION_STEPS,
+                 loading_step=None,
                  device_name='cpu:0'):
 
         super(DQNAgent, self).__init__()
@@ -43,10 +45,8 @@ class DQNAgent(tf.keras.Model):
         # saving checkpoint directory
         self.checkpoint_directory = checkpoint_directory
 
-        self.observation_steps=observation_steps
-        self.exploration_steps = exploration_steps
-        self.initial_epsilon=initial_epsilon
-        self.final_epsilon=final_epsilon
+        self.initial_epsilon = initial_epsilon
+        self.final_epsilon = final_epsilon
 
         # init q layers
         self.conv1 = tf.layers.Conv2D(32, 8, 8, padding='same', activation=tf.nn.relu)
@@ -84,12 +84,23 @@ class DQNAgent(tf.keras.Model):
         self.epsilon_step = (initial_epsilon - final_epsilon) / exploration_steps
 
         # replay_memory
-        self.replay_memory = ReplayMemory(100000)
+        self.replay_memory = ReplayMemory(500000)
         self.batch_size = batch_size
 
         # for logging
         self.step_count = 0
         self.sum_loss = 0;
+
+        # loading
+        if loading_step == "latest":
+            self.load_last_checkpoint()
+
+        elif loading_step:
+            self.load_specific_checkpoint(loading_step)
+            self.step_count += loading_step
+
+        self.observation_steps = observation_steps + self.step_count
+        self.exploration_steps = exploration_steps + self.step_count
 
         # device configuration
         self.device_name = device_name
@@ -179,12 +190,13 @@ class DQNAgent(tf.keras.Model):
     def step(self, state, action, reward, next_state, terminal):
         if self.step_count <= self.observation_steps:
             self.observe(state, action, reward, next_state, terminal)
+            if self.step_count % 5000 == 0:
+                print("OBSERVATION %s : EPSILON [%6f]...." % (self.step_count, self.epsilon))
         else:
             self.fit(state, action, reward, next_state, terminal)
 
-        if self.step_count % 1000 == 0:
-            print("STEP %s : EPSILON [%6f]...." % (self.step_count, self.epsilon))
-            print("=============================================")
+
+
         self.step_count += 1
 
     def observe(self, state, action, reward, next_state, terminal):
@@ -197,12 +209,11 @@ class DQNAgent(tf.keras.Model):
         state_batch, action_batch, reward_batch, next_state_batch, terminal_batch = self.replay_memory.get_batch(
             self.batch_size)
 
-        current_q = self.predict(state_batch, training=False).numpy()
-        now_q = np.zeros((self.batch_size,self.action_dim))
+        now_q = np.zeros((self.batch_size, self.action_dim))
 
         target_q_batch = self.predict_target(next_state_batch, training=False)
 
-        y_batch = reward_batch + (1 - terminal_batch) * GAMMA * np.max(target_q_batch, axis=1)
+        y_batch = reward_batch * REWARD_WEIGHT + (1 - terminal_batch) * GAMMA * np.max(target_q_batch, axis=1)
 
         for i in range(self.batch_size):
             now_q[i, action_batch[i]] = y_batch[i]
@@ -212,12 +223,13 @@ class DQNAgent(tf.keras.Model):
                 grads = self.grad(state_batch, now_q, True)
                 self.optimizer.apply_gradients(zip(grads, self.variables))
 
-        if self.step_count % 1000 == 0 :
-            print("loss: %6f" % (self.sum_loss/1000))
+        if self.step_count % 5000 == 0:
+            print("STEP %s : EPSILON [%6f]...." % (self.step_count, self.epsilon))
+            print("loss: %6f" % (self.sum_loss / 10000))
             self.sum_loss = 0
-            # print(current_q[0])
-            # print(now_q[0])
             print(self.predict(state_batch[0], training=False).numpy())
+            print("=============================================")
+            self.save(global_step=self.step_count)
 
         return
 
@@ -233,5 +245,25 @@ class DQNAgent(tf.keras.Model):
         dummy_pred = self.predict(dummy_input, training=False)
         # Restore the variables of the model
         saver = tfe.Saver(self.variables)
+        from colorama import Fore, Style
+        print(Fore.CYAN + "loading " + tf.train.latest_checkpoint(self.checkpoint_directory))
+        print(Style.RESET_ALL)
         saver.restore(tf.train.latest_checkpoint
                       (self.checkpoint_directory))
+        self.step_count = int(tf.train.latest_checkpoint(self.checkpoint_directory).split('/')[-1][1:])
+
+    def load_specific_checkpoint(self, step_number):
+        # Run the model once to initialize variables
+        initialshape = list(self.state_shape)
+        initialshape[0] = 1
+        initialshape = tuple(initialshape)
+        dummy_input = tf.constant(tf.zeros(initialshape))
+        dummy_pred = self.predict(dummy_input, training=False)
+        # Restore the variables of the model
+        saver = tfe.Saver(self.variables)
+        name = self.checkpoint_directory + "-" + str(step_number)
+        from colorama import Fore, Style
+        print(Fore.CYAN + "loading " + name)
+
+        print(Style.RESET_ALL)
+        saver.restore(name)

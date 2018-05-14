@@ -7,19 +7,19 @@ import gym
 env = gym.make('Breakout-v0')
 agent = DQNAgent(state_shape=(-1, 80, 80, 1),
                  action_dim=4,
-                 checkpoint_directory="./models_checkpoints/rl/",
+                 checkpoint_directory="./models_checkpoints/rl2/",
                  batch_size=32,
                  initial_epsilon=1.0,
-                 final_epsilon=0.05,
-                 exploration_steps=300000,
-                 observation_steps=1000,
+                 final_epsilon=0.15,
+                 exploration_steps=500000,
+                 observation_steps=50000,
+                 loading_step=None,
                  device_name="gpu:0")
 
-# agent.load_last_checkpoint()
-
+verbose_step = 20
 total_reward = 0.0
-episode_step_50 = 0
-time_50=time.time()
+episode_step = 0
+time_step = time.time()
 
 for i_episode in range(100000):
     observation = env.reset()
@@ -41,23 +41,21 @@ for i_episode in range(100000):
             if agent.step_count > agent.observation_steps:
                 agent.copy_base_to_target()
 
-            if i_episode % 50 == 0:
-                spend_time = time.time() - time_50
-                total_step = agent.step_count - episode_step_50
+            if i_episode % verbose_step == 0:
+                spend_time = time.time() - time_step
+                total_step = agent.step_count - episode_step
 
                 print(Fore.RED + "#############################################")
                 print("Episode {} finished after {} timesteps".format(i_episode, t + 1))
-                print("reward[%d - %d]: %3f" % (min([0,i_episode - 49]), i_episode, total_reward / 50))
+                print("reward[%d-%d]: %3f" % (max(i_episode - verbose_step, 0), i_episode, total_reward  / verbose_step))
                 print("epsilon: %s" % agent.epsilon)
                 print("%s step - %s sec" % (total_step, spend_time))
-                print("average time for step : %s" % (spend_time/total_step))
+                print("average time for step : %s" % (spend_time / total_step))
                 print("#############################################")
                 print(Style.RESET_ALL)
-                if agent.step_count > agent.observation_steps:
-                    agent.save(i_episode)
 
                 total_reward = 0.0
-                episode_step_50 = agent.step_count
-                time_50 = time.time()
+                episode_step = agent.step_count
+                time_step = time.time()
 
             break
